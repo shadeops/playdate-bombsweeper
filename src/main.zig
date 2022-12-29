@@ -72,6 +72,15 @@ fn loadBitmaps(playdate: *const pdapi.PlaydateAPI) void {
 fn resetBoard(playdate: *const pdapi.PlaydateAPI) void {
     var seed = playdate.system.getSecondsSinceEpoch(null);
     game_board = board.GameBoard.init(num_mines, seed);
+
+    playdate.graphics.clear(@enumToInt(pdapi.LCDSolidColor.ColorBlack));
+    playdate.graphics.tileBitmap(bitmaps[9], 0, 0, 399, 239, pdapi.LCDBitmapFlip.BitmapUnflipped);
+
+    var iter = board.tileIterator(0, 0, board.tiles_x, board.tiles_y);
+    while (iter.next()) |tile_offset| {
+        drawTile(tile_offset, playdate);
+    }
+    cursor.draw(playdate);
 }
 
 fn drawTile(tile_offset: usize, playdate: *const pdapi.PlaydateAPI) void {
@@ -80,6 +89,13 @@ fn drawTile(tile_offset: usize, playdate: *const pdapi.PlaydateAPI) void {
     const pixel_x = @intCast(c_int, coord[0] * board.tile_size);
     const pixel_y = @intCast(c_int, coord[1] * board.tile_size);
     var bitmap_idx: usize = 0;
+    playdate.graphics.fillRect(
+        pixel_x + 1,
+        pixel_y + 1,
+        board.tile_size - 1,
+        board.tile_size - 1,
+        @enumToInt(pdapi.LCDSolidColor.ColorBlack),
+    );
     if (tile.is_bomb and tile.is_visible) {
         bitmap_idx = 11;
     } else if (!tile.is_visible and tile.is_marked) {
@@ -90,8 +106,8 @@ fn drawTile(tile_offset: usize, playdate: *const pdapi.PlaydateAPI) void {
         playdate.graphics.fillRect(
             pixel_x + 1,
             pixel_y + 1,
-            15,
-            15,
+            board.tile_size - 1,
+            board.tile_size - 1,
             @enumToInt(pdapi.LCDSolidColor.ColorWhite),
         );
         return;
@@ -182,12 +198,28 @@ const Cursor = struct {
     prev_button: c_int = 0,
     delay: usize = 3,
 
-    fn tile(self: Cursor) usize {
+    fn tileOffset(self: Cursor) usize {
         return board.toTile(self.x, self.y);
     }
 
-    fn prev_tile(self: Cursor) usize {
+    fn prevTileOffset(self: Cursor) usize {
         return board.toTile(self.px, self.py);
+    }
+
+    fn draw(self: Cursor, playdate: *const pdapi.PlaydateAPI) void {
+        //playdate.graphics.setDrawMode(pdapi.LCDBitmapDrawMode.DrawModeInverted);
+        playdate.graphics.setDrawMode(pdapi.LCDBitmapDrawMode.DrawModeXOR);
+        defer playdate.graphics.setDrawMode(pdapi.LCDBitmapDrawMode.DrawModeCopy);
+
+        drawTile(self.tileOffset(), playdate);
+        var tile = game_board.tiles[self.tileOffset()];
+        playdate.graphics.fillRect(
+            @intCast(c_int, self.x * board.tile_size + 1),
+            @intCast(c_int, self.y * board.tile_size + 1),
+            board.tile_size - 1,
+            board.tile_size - 1,
+            @ptrToInt(if (tile.is_visible) &checks else &inv_checks),
+        );
     }
 
     fn move(self: *Cursor, button: c_int) void {
@@ -266,43 +298,36 @@ fn update_and_render(userdata: ?*anyopaque) callconv(.C) c_int {
     var released_buttons: pdapi.PDButtons = undefined;
     playdate.system.getButtonState(&current_buttons, &pushed_buttons, &released_buttons);
 
-    playdate.graphics.clear(@enumToInt(pdapi.LCDSolidColor.ColorBlack));
-    playdate.graphics.tileBitmap(bitmaps[9], 0, 0, 399, 239, pdapi.LCDBitmapFlip.BitmapUnflipped);
-
-    var iter = board.tileIterator(0, 0, board.tiles_x, board.tiles_y);
-    while (iter.next()) |tile_offset| {
-        drawTile(tile_offset, playdate);
-    }
-
     if (!game_board.failed) {
+        var redraw = false;
         var moved = cursor.update(playdate);
-        _ = moved;
-
-        if ((released_buttons & pdapi.BUTTON_A) > 0) {
-            _ = game_board.reveal(board.toTile(cursor.x, cursor.y));
+        if ((released_buttons & pdapi.BUTTON_A) != 0) {
+            var tile_iter = game_board.reveal(cursor.tileOffset());
+            while (tile_iter.next()) |tile_offset| {
+                drawTile(tile_offset, playdate);
+            }
+            redraw = true;
         }
-        if ((released_buttons & pdapi.BUTTON_B) > 0) {
-            game_board.mark(board.toTile(cursor.x, cursor.y));
+        if (released_buttons & pdapi.BUTTON_B != 0) {
+            game_board.mark(cursor.tileOffset());
+            drawTile(cursor.tileOffset(), playdate);
+            redraw = true;
+        }
+        if (moved) {
+            drawTile(cursor.prevTileOffset(), playdate);
+            redraw = true;
+        }
+        if (redraw) {
+            cursor.draw(playdate);
+            return 1;
         }
     } else {
-        if ((released_buttons & (pdapi.BUTTON_A | pdapi.BUTTON_B)) > 0) {
+        if ((released_buttons & (pdapi.BUTTON_A | pdapi.BUTTON_B)) != 0) {
             resetBoard(playdate);
+            return 1;
         }
     }
 
-    {
-        //playdate.graphics.setDrawMode(pdapi.LCDBitmapDrawMode.DrawModeInverted);
-        playdate.graphics.setDrawMode(pdapi.LCDBitmapDrawMode.DrawModeXOR);
-        defer playdate.graphics.setDrawMode(pdapi.LCDBitmapDrawMode.DrawModeCopy);
-        var tile = game_board.tiles[board.toTile(cursor.x, cursor.y)];
-        playdate.graphics.fillRect(
-            @intCast(c_int, cursor.x * board.tile_size),
-            @intCast(c_int, cursor.y * board.tile_size),
-            16,
-            16,
-            @ptrToInt(if (tile.is_visible) &checks else &inv_checks),
-        );
-    }
     //returning 1 signals to the OS to draw the frame.
-    return 1;
+    return 0;
 }

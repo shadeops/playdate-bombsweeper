@@ -25,25 +25,25 @@ pub fn toCoord(offset: usize) Coord {
 pub fn toTile(x: usize, y: usize) usize {
     return y * tiles_x + x;
 }
-    
+
 const NeighbourIterator = struct {
     index: usize = 0,
     offset: usize,
 
     fn next(self: *NeighbourIterator) ?usize {
         if (self.index > 7) return null;
-        
+
         var coord = toCoord(self.offset);
         var x = @intCast(i32, coord[0]);
         switch (self.index) {
-            0,6,7 => x -= 1,
-            2,3,4 => x += 1,
+            0, 6, 7 => x -= 1,
+            2, 3, 4 => x += 1,
             else => {},
         }
         var y = @intCast(i32, coord[1]);
         switch (self.index) {
-            0,1,2 => y -= 1,
-            4,5,6 => y += 1,
+            0, 1, 2 => y -= 1,
+            4, 5, 6 => y += 1,
             else => {},
         }
 
@@ -67,12 +67,12 @@ const TileIterator = struct {
 
     pub fn next(self: *TileIterator) ?usize {
         if (self.y_idx >= self.y_size) return null;
-     
+
         var x = self.x_idx + self.x_start;
         var y = self.y_idx + self.y_start;
 
         self.x_idx += 1;
-        if (self.x_idx>=self.x_size) self.y_idx +=1;
+        if (self.x_idx >= self.x_size) self.y_idx += 1;
         self.x_idx %= self.x_size;
 
         if (x >= tiles_x or y >= tiles_y) return self.next();
@@ -80,7 +80,7 @@ const TileIterator = struct {
     }
 };
 
-pub fn tileIterator(x_start: usize, y_start: usize, x_size: usize, y_size: usize) TileIterator{
+pub fn tileIterator(x_start: usize, y_start: usize, x_size: usize, y_size: usize) TileIterator {
     return .{
         .x_start = x_start,
         .y_start = y_start,
@@ -88,6 +88,40 @@ pub fn tileIterator(x_start: usize, y_start: usize, x_size: usize, y_size: usize
         .y_size = y_size,
     };
 }
+
+const TileRange = struct {
+    x_min: usize,
+    x_max: usize,
+    y_min: usize,
+    y_max: usize,
+
+    fn init(offset: usize) TileRange {
+        var xy = toCoord(offset);
+        return .{
+            .x_min = xy[0],
+            .x_max = xy[0],
+            .y_min = xy[1],
+            .y_max = xy[1],
+        };
+    }
+
+    fn expand(self: *TileRange, offset: usize) void {
+        var xy = toCoord(offset);
+        self.x_min = @min(xy[0], self.x_min);
+        self.x_max = @max(xy[0], self.x_max);
+        self.y_min = @min(xy[1], self.y_min);
+        self.y_max = @max(xy[1], self.y_max);
+    }
+
+    fn toIterator(self: TileRange) TileIterator {
+        return tileIterator(
+            self.x_min,
+            self.y_min,
+            self.x_max - self.x_min + 1,
+            self.y_max - self.y_min + 1,
+        );
+    }
+};
 
 pub const GameBoard = struct {
     const Self = @This();
@@ -128,30 +162,32 @@ pub const GameBoard = struct {
         return (self.num_bombs == self.num_hidden) and (self.failed == false);
     }
 
-    pub fn reveal(self: *GameBoard, tile: usize) bool {
-        self.tiles[tile].is_visible = true;
-        if (self.tiles[tile].is_bomb) {
+    pub fn reveal(self: *GameBoard, tile_offset: usize) TileIterator {
+        self.tiles[tile_offset].is_visible = true;
+        if (self.tiles[tile_offset].is_bomb) {
             self.failed = true;
             self.revealBoard();
-            return false;
+            return tileIterator(0, 0, tiles_x, tiles_y);
         }
         self.num_hidden -= 1;
-        if (self.tiles[tile].local_bombs == 0) self.exposeSafe(tile);
-        return true;
+        var range = TileRange.init(tile_offset);
+        if (self.tiles[tile_offset].local_bombs == 0) self.exposeSafe(tile_offset, &range);
+        return range.toIterator();
     }
 
     pub fn mark(self: *GameBoard, tile: usize) void {
         self.tiles[tile].is_marked = !self.tiles[tile].is_marked;
     }
 
-    fn exposeSafe(self: *GameBoard, tile: usize) void {
+    fn exposeSafe(self: *GameBoard, tile: usize, range: *TileRange) void {
         var iter = neighbourIterator(tile);
         while (iter.next()) |tile_offset| {
             if (self.tiles[tile_offset].is_visible) continue;
             if (self.tiles[tile_offset].is_bomb) continue;
             self.tiles[tile_offset].is_visible = true;
+            range.expand(tile_offset);
             if (self.tiles[tile_offset].local_bombs == 0) {
-                self.exposeSafe(tile_offset);
+                self.exposeSafe(tile_offset, range);
             }
         }
     }
