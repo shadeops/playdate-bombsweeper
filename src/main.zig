@@ -3,7 +3,6 @@ const board = @import("board.zig");
 const pdapi = @import("playdate_api_definitions.zig");
 
 const bitmap_names = [_][]const u8{ "0", "1", "2", "3", "4", "5", "6", "7", "8", "border", "unk", "bomb" };
-const menu_options = [_][]const u8{ "20", "40", "80" };
 
 const checks = pdapi.LCDPattern{
     0xaa, 0x55, 0xaa, 0x55, 0xaa, 0x55, 0xaa, 0x55,
@@ -15,13 +14,23 @@ const inv_checks = pdapi.LCDPattern{
     0x55, 0xaa, 0x55, 0xaa, 0x55, 0xaa, 0x55, 0xaa,
 };
 
+const GameState = enum {
+    active,
+    end,
+};
+
 // Global State
+var game_state = GameState.active;
 var bitmaps = [_]*pdapi.LCDBitmap{undefined} ** 12;
+var failed_map: *pdapi.LCDBitmap = undefined;
+var won_map: *pdapi.LCDBitmap = undefined;
 var game_board: board.GameBoard = undefined;
 var num_mines: u32 = 40;
 var mines_menu: ?*pdapi.PDMenuItem = null;
 var cursor = Cursor{};
+var font: ?*pdapi.LCDFont = null;
 
+// NOTE: Common factors of 400x240
 // 1, 2,    4, 5,    8, 10,         16, 20,     25,     40,     50,     80, 100,      200,      400
 // 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 16, 20, 24,     30, 40, 48,     60, 80,      120,      240
 
@@ -59,136 +68,6 @@ var cursor = Cursor{};
 //    }
 //}
 
-fn loadBitmaps(playdate: *const pdapi.PlaydateAPI) void {
-    for (bitmaps) |*bitmap, i| {
-        bitmap.* = playdate.graphics.loadBitmap(bitmap_names[i].ptr, null).?;
-        var width: c_int = undefined;
-        var height: c_int = undefined;
-        playdate.graphics.getBitmapData(bitmap.*, &width, &height, null, null, null);
-        //playdate.system.logToConsole("%d x %d", width, height);
-    }
-}
-
-fn resetBoard(playdate: *const pdapi.PlaydateAPI) void {
-    var seed = playdate.system.getSecondsSinceEpoch(null);
-    game_board = board.GameBoard.init(num_mines, seed);
-
-    playdate.graphics.clear(@enumToInt(pdapi.LCDSolidColor.ColorBlack));
-    playdate.graphics.tileBitmap(bitmaps[9], 0, 0, 399, 239, pdapi.LCDBitmapFlip.BitmapUnflipped);
-
-    var iter = board.tileIterator(0, 0, board.tiles_x, board.tiles_y);
-    while (iter.next()) |tile_offset| {
-        drawTile(tile_offset, playdate);
-    }
-    cursor.draw(playdate);
-}
-
-fn drawTile(tile_offset: usize, playdate: *const pdapi.PlaydateAPI) void {
-    const coord = board.toCoord(tile_offset);
-    const tile = game_board.tiles[tile_offset];
-    const pixel_x = @intCast(c_int, coord[0] * board.tile_size);
-    const pixel_y = @intCast(c_int, coord[1] * board.tile_size);
-    var bitmap_idx: usize = 0;
-    playdate.graphics.fillRect(
-        pixel_x + 1,
-        pixel_y + 1,
-        board.tile_size - 1,
-        board.tile_size - 1,
-        @enumToInt(pdapi.LCDSolidColor.ColorBlack),
-    );
-    if (tile.is_bomb and tile.is_visible) {
-        bitmap_idx = 11;
-    } else if (!tile.is_visible and tile.is_marked) {
-        bitmap_idx = 10;
-    } else if (tile.is_visible) {
-        bitmap_idx = tile.local_bombs;
-    } else {
-        playdate.graphics.fillRect(
-            pixel_x + 1,
-            pixel_y + 1,
-            board.tile_size - 1,
-            board.tile_size - 1,
-            @enumToInt(pdapi.LCDSolidColor.ColorWhite),
-        );
-        return;
-    }
-    playdate.graphics.drawBitmap(
-        bitmaps[bitmap_idx],
-        pixel_x + 1,
-        pixel_y + 1,
-        pdapi.LCDBitmapFlip.BitmapUnflipped,
-    );
-    return;
-}
-
-fn restartGameCallback(userdata: ?*anyopaque) callconv(.C) void {
-    const playdate = @ptrCast(*const pdapi.PlaydateAPI, @alignCast(@alignOf(pdapi.PlaydateAPI), userdata.?));
-    resetBoard(playdate);
-}
-
-fn setNumMinesCallback(userdata: ?*anyopaque) callconv(.C) void {
-    const playdate = @ptrCast(*const pdapi.PlaydateAPI, @alignCast(@alignOf(pdapi.PlaydateAPI), userdata.?));
-    if (mines_menu != null) {
-        var option = playdate.system.getMenuItemValue(mines_menu);
-        switch (option) {
-            0 => num_mines = 20,
-            1 => num_mines = 40,
-            2 => num_mines = 80,
-            else => playdate.system.logToConsole("Unknown menu setting"),
-        }
-    }
-    //playdate.system.logToConsole("menu");
-}
-
-pub export fn eventHandler(playdate: *pdapi.PlaydateAPI, event: pdapi.PDSystemEvent, arg: u32) c_int {
-    _ = arg;
-    switch (event) {
-        .EventInit => {
-            const font = playdate.graphics.loadFont("/System/Fonts/Asheville-Sans-14-Bold.pft", null).?;
-            playdate.graphics.setFont(font);
-            loadBitmaps(playdate);
-            resetBoard(playdate);
-            playdate.system.setUpdateCallback(update_and_render, playdate);
-
-            _ = playdate.system.addMenuItem("Restart", restartGameCallback, playdate);
-
-            // TODO: This seems wrong, we shouldn't have to realloc for const values?
-            var options = @ptrCast(
-                [*c][*c]const u8,
-                @alignCast(
-                    @alignOf(*c_int),
-                    playdate.system.realloc(null, @sizeOf(*c_int) * menu_options.len).?,
-                ),
-            );
-            for (options[0..menu_options.len]) |*option, i| option.* = menu_options[i].ptr;
-            mines_menu = playdate.system.addOptionsMenuItem(
-                "Mines",
-                options,
-                menu_options.len,
-                setNumMinesCallback,
-                playdate,
-            );
-            playdate.system.setMenuItemValue(mines_menu, 1);
-        },
-        .EventTerminate => {
-            for (bitmaps) |*bitmap| {
-                playdate.graphics.freeBitmap(bitmap.*);
-            }
-        },
-        else => {},
-    }
-    return 0;
-}
-
-//fn offsetToPixel(tile_offset: usize) [2]usize {
-//    @intCast(c_int, cur_pos[0] * board.tile_size),
-//    @intCast(c_int, cur_pos[1] * board.tile_size),
-//}
-//
-//fn tileToPixel(x: usize, y: usize) [2]usize {
-//
-//}
-
 const Cursor = struct {
     accel: usize = 0,
     x: usize = 0,
@@ -207,7 +86,6 @@ const Cursor = struct {
     }
 
     fn draw(self: Cursor, playdate: *const pdapi.PlaydateAPI) void {
-        //playdate.graphics.setDrawMode(pdapi.LCDBitmapDrawMode.DrawModeInverted);
         playdate.graphics.setDrawMode(pdapi.LCDBitmapDrawMode.DrawModeXOR);
         defer playdate.graphics.setDrawMode(pdapi.LCDBitmapDrawMode.DrawModeCopy);
 
@@ -290,6 +168,165 @@ const Cursor = struct {
     }
 };
 
+fn drawBitmaps(playdate: *const pdapi.PlaydateAPI) void {
+    const won_text = "Found All Bombs!";
+    var height = playdate.graphics.getFontHeight(font);
+    var width = playdate.graphics.getTextWidth(font, won_text, won_text.len, pdapi.PDStringEncoding.ASCIIEncoding, 0);
+    won_map = playdate.graphics.newBitmap(width + 2, height + 2, @enumToInt(pdapi.LCDSolidColor.ColorClear)).?;
+    {
+        playdate.graphics.pushContext(won_map);
+        defer playdate.graphics.popContext();
+        _ = playdate.graphics.drawText(won_text, won_text.len, pdapi.PDStringEncoding.ASCIIEncoding, 1, 1);
+    }
+
+    const failed_text = "Bomb Triggered!";
+    width = playdate.graphics.getTextWidth(font, failed_text, failed_text.len, pdapi.PDStringEncoding.ASCIIEncoding, 0);
+    failed_map = playdate.graphics.newBitmap(width + 2, height + 2, @enumToInt(pdapi.LCDSolidColor.ColorClear)).?;
+    {
+        playdate.graphics.pushContext(failed_map);
+        defer playdate.graphics.popContext();
+        _ = playdate.graphics.drawText(failed_text, failed_text.len, pdapi.PDStringEncoding.ASCIIEncoding, 1, 1);
+    }
+}
+
+fn loadBitmaps(playdate: *const pdapi.PlaydateAPI) void {
+    for (bitmaps) |*bitmap, i| {
+        bitmap.* = playdate.graphics.loadBitmap(bitmap_names[i].ptr, null).?;
+        var width: c_int = undefined;
+        var height: c_int = undefined;
+        playdate.graphics.getBitmapData(bitmap.*, &width, &height, null, null, null);
+    }
+}
+
+fn resetBoard(playdate: *const pdapi.PlaydateAPI) void {
+    var seed = playdate.system.getSecondsSinceEpoch(null);
+    game_board = board.GameBoard.init(num_mines, seed);
+
+    playdate.graphics.clear(@enumToInt(pdapi.LCDSolidColor.ColorBlack));
+    playdate.graphics.tileBitmap(bitmaps[9], 0, 0, 399, 239, pdapi.LCDBitmapFlip.BitmapUnflipped);
+
+    var iter = board.tileIterator(0, 0, board.tiles_x, board.tiles_y);
+    while (iter.next()) |tile_offset| {
+        drawTile(tile_offset, playdate);
+    }
+    cursor.draw(playdate);
+    game_state = .active;
+}
+
+fn drawTile(tile_offset: usize, playdate: *const pdapi.PlaydateAPI) void {
+    const coord = board.toCoord(tile_offset);
+    const tile = game_board.tiles[tile_offset];
+    const pixel_x = @intCast(c_int, coord[0] * board.tile_size);
+    const pixel_y = @intCast(c_int, coord[1] * board.tile_size);
+    var bitmap_idx: usize = 0;
+    playdate.graphics.fillRect(
+        pixel_x + 1,
+        pixel_y + 1,
+        board.tile_size - 1,
+        board.tile_size - 1,
+        @enumToInt(pdapi.LCDSolidColor.ColorBlack),
+    );
+    if (tile.is_bomb and tile.is_visible) {
+        bitmap_idx = 11;
+    } else if (!tile.is_visible and tile.is_marked) {
+        bitmap_idx = 10;
+    } else if (tile.is_visible) {
+        bitmap_idx = tile.local_bombs;
+    } else {
+        playdate.graphics.fillRect(
+            pixel_x + 1,
+            pixel_y + 1,
+            board.tile_size - 1,
+            board.tile_size - 1,
+            @enumToInt(pdapi.LCDSolidColor.ColorWhite),
+        );
+        return;
+    }
+    playdate.graphics.drawBitmap(
+        bitmaps[bitmap_idx],
+        pixel_x + 1,
+        pixel_y + 1,
+        pdapi.LCDBitmapFlip.BitmapUnflipped,
+    );
+    return;
+}
+
+fn drawEndBoard(playdate: *const pdapi.PlaydateAPI, map: *pdapi.LCDBitmap) void {
+    var iter = board.tileIterator(0, 0, board.tiles_x, board.tiles_y);
+    while (iter.next()) |tile_offset| {
+        var tile = game_board.tiles[tile_offset];
+        var xy = board.toCoord(tile_offset);
+        playdate.graphics.fillRect(
+            @intCast(c_int, xy[0] * board.tile_size + 1),
+            @intCast(c_int, xy[1] * board.tile_size + 1),
+            board.tile_size - 1,
+            board.tile_size - 1,
+            @ptrToInt(if (tile.is_visible) &checks else &inv_checks),
+        );
+    }
+    var width: c_int = undefined;
+    var height: c_int = undefined;
+    playdate.graphics.getBitmapData(map, &width, &height, null, null, null);
+    width = @divFloor(400 - (width * 3), 2);
+    height = @divFloor(240 - (height * 3), 2);
+    playdate.graphics.drawScaledBitmap(map, width, height, 3, 3);
+}
+
+
+fn restartGameCallback(userdata: ?*anyopaque) callconv(.C) void {
+    const playdate = @ptrCast(*const pdapi.PlaydateAPI, @alignCast(@alignOf(pdapi.PlaydateAPI), userdata.?));
+    resetBoard(playdate);
+}
+
+fn setNumMinesCallback(userdata: ?*anyopaque) callconv(.C) void {
+    const playdate = @ptrCast(*const pdapi.PlaydateAPI, @alignCast(@alignOf(pdapi.PlaydateAPI), userdata.?));
+    if (mines_menu != null) {
+        var option = playdate.system.getMenuItemValue(mines_menu);
+        switch (option) {
+            0 => num_mines = 20,
+            1 => num_mines = 40,
+            2 => num_mines = 80,
+            else => playdate.system.logToConsole("Unknown menu setting"),
+        }
+    }
+}
+
+pub export fn eventHandler(playdate: *pdapi.PlaydateAPI, event: pdapi.PDSystemEvent, arg: u32) c_int {
+    _ = arg;
+    switch (event) {
+        .EventInit => {
+            font = playdate.graphics.loadFont("/System/Fonts/Asheville-Sans-14-Bold.pft", null).?;
+            playdate.graphics.setFont(font);
+            drawBitmaps(playdate);
+
+            loadBitmaps(playdate);
+            resetBoard(playdate);
+            playdate.system.setUpdateCallback(update_and_render, playdate);
+
+            _ = playdate.system.addMenuItem("Restart", restartGameCallback, playdate);
+
+            var options = [_][*c]const u8{ "20", "40", "80" };
+            mines_menu = playdate.system.addOptionsMenuItem(
+                "Mines",
+                @ptrCast([*c][*c]const u8, @alignCast(@alignOf(*c_int), &options)),
+                options.len,
+                setNumMinesCallback,
+                playdate,
+            );
+            playdate.system.setMenuItemValue(mines_menu, 1);
+        },
+        .EventTerminate => {
+            for (bitmaps) |*bitmap| {
+                playdate.graphics.freeBitmap(bitmap.*);
+            }
+            playdate.graphics.freeBitmap(won_map);
+            playdate.graphics.freeBitmap(failed_map);
+        },
+        else => {},
+    }
+    return 0;
+}
+
 fn update_and_render(userdata: ?*anyopaque) callconv(.C) c_int {
     const playdate = @ptrCast(*const pdapi.PlaydateAPI, @alignCast(@alignOf(pdapi.PlaydateAPI), userdata.?));
 
@@ -298,34 +335,52 @@ fn update_and_render(userdata: ?*anyopaque) callconv(.C) c_int {
     var released_buttons: pdapi.PDButtons = undefined;
     playdate.system.getButtonState(&current_buttons, &pushed_buttons, &released_buttons);
 
-    if (!game_board.failed) {
-        var redraw = false;
-        var moved = cursor.update(playdate);
-        if ((released_buttons & pdapi.BUTTON_A) != 0) {
-            var tile_iter = game_board.reveal(cursor.tileOffset());
-            while (tile_iter.next()) |tile_offset| {
-                drawTile(tile_offset, playdate);
+    switch (game_state) {
+        .end => {
+            if ((released_buttons & (pdapi.BUTTON_A | pdapi.BUTTON_B)) != 0) {
+                resetBoard(playdate);
+                return 1;
             }
-            redraw = true;
-        }
-        if (released_buttons & pdapi.BUTTON_B != 0) {
-            game_board.mark(cursor.tileOffset());
-            drawTile(cursor.tileOffset(), playdate);
-            redraw = true;
-        }
-        if (moved) {
-            drawTile(cursor.prevTileOffset(), playdate);
-            redraw = true;
-        }
-        if (redraw) {
-            cursor.draw(playdate);
+            return 0;
+        },
+        else => {},
+    }
+
+    switch (game_board.state) {
+        .active => {
+            var redraw = false;
+            var moved = cursor.update(playdate);
+            if ((released_buttons & pdapi.BUTTON_A) != 0) {
+                var tile_iter = game_board.reveal(cursor.tileOffset());
+                while (tile_iter.next()) |tile_offset| {
+                    drawTile(tile_offset, playdate);
+                }
+                redraw = true;
+            }
+            if (released_buttons & pdapi.BUTTON_B != 0) {
+                game_board.mark(cursor.tileOffset());
+                drawTile(cursor.tileOffset(), playdate);
+                redraw = true;
+            }
+            if (moved) {
+                drawTile(cursor.prevTileOffset(), playdate);
+                redraw = true;
+            }
+            if (redraw) {
+                cursor.draw(playdate);
+                return 1;
+            }
+        },
+        .failed => {
+            drawEndBoard(playdate, failed_map);
+            game_state = .end;
             return 1;
-        }
-    } else {
-        if ((released_buttons & (pdapi.BUTTON_A | pdapi.BUTTON_B)) != 0) {
-            resetBoard(playdate);
+        },
+        .won => {
+            drawEndBoard(playdate, won_map);
+            game_state = .end;
             return 1;
-        }
+        },
     }
 
     //returning 1 signals to the OS to draw the frame.

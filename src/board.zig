@@ -123,19 +123,25 @@ const TileRange = struct {
     }
 };
 
+const BoardState = enum {
+    active,
+    won,
+    failed,
+};
+
 pub const GameBoard = struct {
     const Self = @This();
     tiles: [total_tiles]TileState,
     num_bombs: u32,
     num_hidden: u32,
-    failed: bool,
+    state: BoardState,
 
     pub fn init(bombs: u32, seed: u32) Self {
         var board = Self{
             .tiles = [_]TileState{.{}} ** total_tiles,
             .num_bombs = bombs,
             .num_hidden = total_tiles,
-            .failed = false,
+            .state = .active,
         };
 
         var prng = std.rand.DefaultPrng.init(seed);
@@ -165,13 +171,14 @@ pub const GameBoard = struct {
     pub fn reveal(self: *GameBoard, tile_offset: usize) TileIterator {
         self.tiles[tile_offset].is_visible = true;
         if (self.tiles[tile_offset].is_bomb) {
-            self.failed = true;
+            self.state = .failed;
             self.revealBoard();
             return tileIterator(0, 0, tiles_x, tiles_y);
         }
         self.num_hidden -= 1;
         var range = TileRange.init(tile_offset);
         if (self.tiles[tile_offset].local_bombs == 0) self.exposeSafe(tile_offset, &range);
+        if (self.num_bombs == self.num_hidden) self.state = .won;
         return range.toIterator();
     }
 
@@ -185,6 +192,7 @@ pub const GameBoard = struct {
             if (self.tiles[tile_offset].is_visible) continue;
             if (self.tiles[tile_offset].is_bomb) continue;
             self.tiles[tile_offset].is_visible = true;
+            self.num_hidden -= 1;
             range.expand(tile_offset);
             if (self.tiles[tile_offset].local_bombs == 0) {
                 self.exposeSafe(tile_offset, range);
