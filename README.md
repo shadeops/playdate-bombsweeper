@@ -1,4 +1,4 @@
-# Zig Implementation of Bombsweeper for the Playdate
+# Bombsweeper for the Playdate in Zig
 
 ![Bombsweeper](/img/playdate.png)
 
