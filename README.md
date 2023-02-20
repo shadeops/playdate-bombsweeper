@@ -12,7 +12,7 @@ created by [Daniel Bokser](https://twitter.com/dbokser91).
 ## Requirements
 
 * Playdate SDK, with `$PLAYDATE_SDK_PATH` set.
-* Zig 0.10.0+
+* Zig 0.10.x
 
 The build.zig is setup for Linux only, to compile on Windows or OSX you should refer to the Zig Playdate Template.
 
