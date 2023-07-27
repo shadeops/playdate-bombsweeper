@@ -34,13 +34,13 @@ const NeighbourIterator = struct {
         if (self.index > 7) return null;
 
         var coord = toCoord(self.offset);
-        var x = @intCast(i32, coord[0]);
+        var x = @as(i32, @intCast(coord[0]));
         switch (self.index) {
             0, 6, 7 => x -= 1,
             2, 3, 4 => x += 1,
             else => {},
         }
-        var y = @intCast(i32, coord[1]);
+        var y = @as(i32, @intCast(coord[1]));
         switch (self.index) {
             0, 1, 2 => y -= 1,
             4, 5, 6 => y += 1,
@@ -49,7 +49,7 @@ const NeighbourIterator = struct {
 
         self.index += 1;
         if (x < 0 or y < 0 or x >= tiles_x or y >= tiles_y) return self.next();
-        return toTile(@intCast(usize, x), @intCast(usize, y));
+        return toTile(@as(usize, @intCast(x)), @as(usize, @intCast(y)));
     }
 };
 
@@ -201,7 +201,7 @@ pub const GameBoard = struct {
     }
 
     fn revealBoard(self: *GameBoard) void {
-        for (self.tiles) |*tile| {
+        for (&self.tiles) |*tile| {
             if (tile.is_bomb) tile.is_visible = true;
         }
     }

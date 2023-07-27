@@ -92,11 +92,11 @@ const Cursor = struct {
         drawTile(self.tileOffset(), playdate);
         var tile = game_board.tiles[self.tileOffset()];
         playdate.graphics.fillRect(
-            @intCast(c_int, self.x * board.tile_size + 1),
-            @intCast(c_int, self.y * board.tile_size + 1),
+            @as(c_int, @intCast(self.x * board.tile_size + 1)),
+            @as(c_int, @intCast(self.y * board.tile_size + 1)),
             board.tile_size - 1,
             board.tile_size - 1,
-            @ptrToInt(if (tile.is_visible) &checks else &inv_checks),
+            @intFromPtr(if (tile.is_visible) &checks else &inv_checks),
         );
     }
 
@@ -172,7 +172,7 @@ fn drawBitmaps(playdate: *const pdapi.PlaydateAPI) void {
     const won_text = "Found All Bombs!";
     var height = playdate.graphics.getFontHeight(font);
     var width = playdate.graphics.getTextWidth(font, won_text, won_text.len, pdapi.PDStringEncoding.ASCIIEncoding, 0);
-    won_map = playdate.graphics.newBitmap(width + 2, height + 2, @enumToInt(pdapi.LCDSolidColor.ColorClear)).?;
+    won_map = playdate.graphics.newBitmap(width + 2, height + 2, @intFromEnum(pdapi.LCDSolidColor.ColorClear)).?;
     {
         playdate.graphics.pushContext(won_map);
         defer playdate.graphics.popContext();
@@ -181,7 +181,7 @@ fn drawBitmaps(playdate: *const pdapi.PlaydateAPI) void {
 
     const failed_text = "Bomb Triggered!";
     width = playdate.graphics.getTextWidth(font, failed_text, failed_text.len, pdapi.PDStringEncoding.ASCIIEncoding, 0);
-    failed_map = playdate.graphics.newBitmap(width + 2, height + 2, @enumToInt(pdapi.LCDSolidColor.ColorClear)).?;
+    failed_map = playdate.graphics.newBitmap(width + 2, height + 2, @intFromEnum(pdapi.LCDSolidColor.ColorClear)).?;
     {
         playdate.graphics.pushContext(failed_map);
         defer playdate.graphics.popContext();
@@ -190,7 +190,7 @@ fn drawBitmaps(playdate: *const pdapi.PlaydateAPI) void {
 }
 
 fn loadBitmaps(playdate: *const pdapi.PlaydateAPI) void {
-    for (bitmaps) |*bitmap, i| {
+    for (&bitmaps, 0..) |*bitmap, i| {
         bitmap.* = playdate.graphics.loadBitmap(bitmap_names[i].ptr, null).?;
         var width: c_int = undefined;
         var height: c_int = undefined;
@@ -202,7 +202,7 @@ fn resetBoard(playdate: *const pdapi.PlaydateAPI) void {
     var seed = playdate.system.getSecondsSinceEpoch(null);
     game_board = board.GameBoard.init(num_mines, seed);
 
-    playdate.graphics.clear(@enumToInt(pdapi.LCDSolidColor.ColorBlack));
+    playdate.graphics.clear(@intFromEnum(pdapi.LCDSolidColor.ColorBlack));
     playdate.graphics.tileBitmap(bitmaps[9], 0, 0, 399, 239, pdapi.LCDBitmapFlip.BitmapUnflipped);
 
     var iter = board.tileIterator(0, 0, board.tiles_x, board.tiles_y);
@@ -216,15 +216,15 @@ fn resetBoard(playdate: *const pdapi.PlaydateAPI) void {
 fn drawTile(tile_offset: usize, playdate: *const pdapi.PlaydateAPI) void {
     const coord = board.toCoord(tile_offset);
     const tile = game_board.tiles[tile_offset];
-    const pixel_x = @intCast(c_int, coord[0] * board.tile_size);
-    const pixel_y = @intCast(c_int, coord[1] * board.tile_size);
+    const pixel_x = @as(c_int, @intCast(coord[0] * board.tile_size));
+    const pixel_y = @as(c_int, @intCast(coord[1] * board.tile_size));
     var bitmap_idx: usize = 0;
     playdate.graphics.fillRect(
         pixel_x + 1,
         pixel_y + 1,
         board.tile_size - 1,
         board.tile_size - 1,
-        @enumToInt(pdapi.LCDSolidColor.ColorBlack),
+        @intFromEnum(pdapi.LCDSolidColor.ColorBlack),
     );
     if (tile.is_bomb and tile.is_visible) {
         bitmap_idx = 11;
@@ -238,7 +238,7 @@ fn drawTile(tile_offset: usize, playdate: *const pdapi.PlaydateAPI) void {
             pixel_y + 1,
             board.tile_size - 1,
             board.tile_size - 1,
-            @enumToInt(pdapi.LCDSolidColor.ColorWhite),
+            @intFromEnum(pdapi.LCDSolidColor.ColorWhite),
         );
         return;
     }
@@ -257,11 +257,11 @@ fn drawEndBoard(playdate: *const pdapi.PlaydateAPI, map: *pdapi.LCDBitmap) void 
         var tile = game_board.tiles[tile_offset];
         var xy = board.toCoord(tile_offset);
         playdate.graphics.fillRect(
-            @intCast(c_int, xy[0] * board.tile_size + 1),
-            @intCast(c_int, xy[1] * board.tile_size + 1),
+            @as(c_int, @intCast(xy[0] * board.tile_size + 1)),
+            @as(c_int, @intCast(xy[1] * board.tile_size + 1)),
             board.tile_size - 1,
             board.tile_size - 1,
-            @ptrToInt(if (tile.is_visible) &checks else &inv_checks),
+            @intFromPtr(if (tile.is_visible) &checks else &inv_checks),
         );
     }
     var width: c_int = undefined;
@@ -272,14 +272,13 @@ fn drawEndBoard(playdate: *const pdapi.PlaydateAPI, map: *pdapi.LCDBitmap) void 
     playdate.graphics.drawScaledBitmap(map, width, height, 3, 3);
 }
 
-
 fn restartGameCallback(userdata: ?*anyopaque) callconv(.C) void {
-    const playdate = @ptrCast(*const pdapi.PlaydateAPI, @alignCast(@alignOf(pdapi.PlaydateAPI), userdata.?));
+    const playdate: *pdapi.PlaydateAPI = @ptrCast(@alignCast(userdata.?));
     resetBoard(playdate);
 }
 
 fn setNumMinesCallback(userdata: ?*anyopaque) callconv(.C) void {
-    const playdate = @ptrCast(*const pdapi.PlaydateAPI, @alignCast(@alignOf(pdapi.PlaydateAPI), userdata.?));
+    const playdate: *pdapi.PlaydateAPI = @ptrCast(@alignCast(userdata.?));
     if (mines_menu != null) {
         var option = playdate.system.getMenuItemValue(mines_menu);
         switch (option) {
@@ -308,7 +307,7 @@ pub export fn eventHandler(playdate: *pdapi.PlaydateAPI, event: pdapi.PDSystemEv
             var options = [_][*c]const u8{ "20", "40", "80" };
             mines_menu = playdate.system.addOptionsMenuItem(
                 "Mines",
-                @ptrCast([*c][*c]const u8, @alignCast(@alignOf(*c_int), &options)),
+                @as([*c][*c]const u8, @ptrCast(@alignCast(&options))),
                 options.len,
                 setNumMinesCallback,
                 playdate,
@@ -316,7 +315,7 @@ pub export fn eventHandler(playdate: *pdapi.PlaydateAPI, event: pdapi.PDSystemEv
             playdate.system.setMenuItemValue(mines_menu, 1);
         },
         .EventTerminate => {
-            for (bitmaps) |*bitmap| {
+            for (&bitmaps) |*bitmap| {
                 playdate.graphics.freeBitmap(bitmap.*);
             }
             playdate.graphics.freeBitmap(won_map);
@@ -328,7 +327,7 @@ pub export fn eventHandler(playdate: *pdapi.PlaydateAPI, event: pdapi.PDSystemEv
 }
 
 fn update_and_render(userdata: ?*anyopaque) callconv(.C) c_int {
-    const playdate = @ptrCast(*const pdapi.PlaydateAPI, @alignCast(@alignOf(pdapi.PlaydateAPI), userdata.?));
+    const playdate: *pdapi.PlaydateAPI = @ptrCast(@alignCast(userdata.?));
 
     var current_buttons: pdapi.PDButtons = undefined;
     var pushed_buttons: pdapi.PDButtons = undefined;
