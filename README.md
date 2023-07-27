@@ -11,10 +11,8 @@ created by [Daniel Bokser](https://twitter.com/dbokser91).
 
 ## Requirements
 
-* Playdate SDK, with `$PLAYDATE_SDK_PATH` set.
-* Zig 0.10.x
-
-The build.zig is setup for Linux only, to compile on Windows or OSX you should refer to the Zig Playdate Template.
+* Playdate SDK 2, with `$PLAYDATE_SDK_PATH` set.
+* Zig 0.11.x
 
 ## Install
 `zig build`
@@ -22,4 +20,3 @@ or
 `zig build run`
 
 The compiled Playdate package will be in `zig-out/bombsweeper.pdx`
-
