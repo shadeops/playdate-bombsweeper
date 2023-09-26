@@ -16,7 +16,9 @@ const inv_checks = pdapi.LCDPattern{
 
 const GameState = enum {
     active,
+    refresh,
     end,
+    start,
 };
 
 // Global State
@@ -198,6 +200,15 @@ fn loadBitmaps(playdate: *const pdapi.PlaydateAPI) void {
     }
 }
 
+fn refreshBoard(playdate: *const pdapi.PlaydateAPI) void {
+    var iter = board.tileIterator(0, 0, board.tiles_x, board.tiles_y);
+    while (iter.next()) |tile_offset| {
+        drawTile(tile_offset, playdate);
+    }
+    cursor.draw(playdate);
+    game_state = .active;
+}
+
 fn resetBoard(playdate: *const pdapi.PlaydateAPI) void {
     var seed = playdate.system.getSecondsSinceEpoch(null);
     game_board = board.GameBoard.init(num_mines, seed);
@@ -205,12 +216,7 @@ fn resetBoard(playdate: *const pdapi.PlaydateAPI) void {
     playdate.graphics.clear(@intFromEnum(pdapi.LCDSolidColor.ColorBlack));
     playdate.graphics.tileBitmap(bitmaps[9], 0, 0, 399, 239, pdapi.LCDBitmapFlip.BitmapUnflipped);
 
-    var iter = board.tileIterator(0, 0, board.tiles_x, board.tiles_y);
-    while (iter.next()) |tile_offset| {
-        drawTile(tile_offset, playdate);
-    }
-    cursor.draw(playdate);
-    game_state = .active;
+    refreshBoard(playdate);
 }
 
 fn drawTile(tile_offset: usize, playdate: *const pdapi.PlaydateAPI) void {
@@ -299,7 +305,7 @@ pub export fn eventHandler(playdate: *pdapi.PlaydateAPI, event: pdapi.PDSystemEv
             drawBitmaps(playdate);
 
             loadBitmaps(playdate);
-            resetBoard(playdate);
+            game_state = .start;
             playdate.system.setUpdateCallback(update_and_render, playdate);
 
             _ = playdate.system.addMenuItem("Restart", restartGameCallback, playdate);
@@ -313,6 +319,9 @@ pub export fn eventHandler(playdate: *pdapi.PlaydateAPI, event: pdapi.PDSystemEv
                 playdate,
             );
             playdate.system.setMenuItemValue(mines_menu, 1);
+        },
+        .EventUnlock => {
+            game_state = .refresh;
         },
         .EventTerminate => {
             for (&bitmaps) |*bitmap| {
@@ -335,12 +344,20 @@ fn update_and_render(userdata: ?*anyopaque) callconv(.C) c_int {
     playdate.system.getButtonState(&current_buttons, &pushed_buttons, &released_buttons);
 
     switch (game_state) {
+        .start => {
+            resetBoard(playdate);
+            return 1;
+        },
         .end => {
             if ((released_buttons & (pdapi.BUTTON_A | pdapi.BUTTON_B)) != 0) {
-                resetBoard(playdate);
+                game_state = .start;
                 return 1;
             }
             return 0;
+        },
+        .refresh => {
+            refreshBoard(playdate);
+            return 1;
         },
         else => {},
     }

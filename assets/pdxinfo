@@ -3,4 +3,4 @@ author=shadeops
 description=Find bombs, don't explode.
 bundleID=com.shadeops.bombsweeper
 imagePath=bombsweeper_card
-version=2.0
+version=2.0.1
